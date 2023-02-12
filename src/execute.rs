@@ -178,6 +178,16 @@ pub fn run(args: Cli) -> Result<(), Box<dyn Error>> {
                 }
             };
         }
+        #[allow(unused_variables)]
+        Commands::Aggregate {
+            input_proof_path,
+            output_proof_path,
+            vk_path,
+            params_path,
+            pfsys,
+        } => {
+            unimplemented!()
+        }
         Commands::Verify {
             model: _,
             proof_path,

@@ -179,6 +179,7 @@ impl Model {
                 Mode::Prove,
                 visibility,
             ),
+            Commands::Aggregate { .. } => todo!(),
             Commands::Verify { model, .. } => Model::new(
                 model,
                 args.scale,

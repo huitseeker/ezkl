@@ -134,10 +134,10 @@ pub enum Commands {
         /// The path to the desired output file
         #[arg(long)]
         proof_path: PathBuf,
-        /// The path to output to the desired verfication key file (optional)
+        /// The path to output to the desired verification key file (optional)
         #[arg(long)]
         vk_path: PathBuf,
-        /// The path to output to the desired verfication key file (optional)
+        /// The path to output to the desired verification key file (optional)
         #[arg(long)]
         params_path: PathBuf,
         /// The [ProofSystem] we'll be using.
@@ -169,6 +169,32 @@ pub enum Commands {
         #[arg(long)]
         params_path: PathBuf,
 
+        #[arg(
+            long,
+	    short = 'B',
+            require_equals = true,
+            num_args = 0..=1,
+            default_value_t = ProofSystem::KZG,
+            value_enum
+        )]
+        pfsys: ProofSystem,
+    },
+    /// Aggregates one or more compatible proofs, creating an aggregate proof, saving aggregate proof in --proof-path
+    #[command(arg_required_else_help = true)]
+    Aggregate {
+        /// The path to the input (application) proof file
+        #[arg(long)]
+        input_proof_path: PathBuf,
+        /// The path to the output (aggregation) proof file
+        #[arg(long)]
+        output_proof_path: PathBuf,
+        /// The path to output to the desired verfication key file (optional)
+        #[arg(long)]
+        vk_path: PathBuf,
+        /// The parameters
+        #[arg(long)]
+        params_path: PathBuf,
+        /// The [ProofSystem] we'll be using.
         #[arg(
             long,
 	    short = 'B',
