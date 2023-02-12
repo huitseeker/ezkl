@@ -155,6 +155,7 @@ pub fn run(args: Cli) -> Result<(), Box<dyn Error>> {
                 ProofSystem::IPA => {
                     unimplemented!()
                 }
+                // #[cfg(not(feature = "evm"))]
                 ProofSystem::KZG => {
                     info!("proof with {}", pfsys);
                     let (circuit, public_inputs) = prepare_circuit_and_public_input(&data, &args)?;
@@ -175,7 +176,48 @@ pub fn run(args: Cli) -> Result<(), Box<dyn Error>> {
                     proof.save(proof_path)?;
                     save_params::<KZGCommitmentScheme<Bn256>>(params_path, &params)?;
                     save_vk::<KZGCommitmentScheme<Bn256>>(vk_path, pk.get_vk())?;
-                }
+                } // #[cfg(feature = "evm")]
+                  // ProofSystem::KZG => {
+                  // Create proof and instance variables for the application snark for aggregation
+                  // pub fn gen_application_snark(
+                  // 	params: &ParamsKZG<Bn256>,
+                  // 	data: &ModelInput,
+                  // 	args: &Cli,
+                  // ) -> Result<Snark, Box<dyn Error>> {
+                  // let (circuit, public_inputs) =
+                  //     prepare_circuit_and_public_input::<Fr>(&data, &args)?;
+
+                  // /// Generate the proving key
+                  // pub fn gen_pk<C: Circuit<Fr>>(
+                  //     params: &ParamsKZG<Bn256>,
+                  //     circuit: &C,
+                  // ) -> Result<ProvingKey<G1Affine>, plonk::Error> {
+                  //     let vk = keygen_vk(params, circuit)?;
+                  //     keygen_pk(params, vk, circuit)
+                  // }
+
+                  //     let pk = gen_pk(params, &circuit)?;
+                  //     let number_instance = public_inputs[0].len();
+                  //     trace!("number_instance {:?}", number_instance);
+                  //     let protocol = compile(
+                  //         params,
+                  //         pk.get_vk(),
+                  //         Config::kzg().with_num_instance(vec![number_instance]),
+                  //     );
+                  //     let pi_inner: Vec<Vec<Fr>> = public_inputs
+                  //         .iter()
+                  //         .map(|i| i.iter().map(|e| i32_to_felt::<Fr>(*e)).collect::<Vec<Fr>>())
+                  //         .collect::<Vec<Vec<Fr>>>();
+                  //     //    let pi_inner = pi_inner.iter().map(|e| e.deref()).collect::<Vec<&[Fr]>>();
+                  //     trace!("pi_inner {:?}", pi_inner);
+                  //     let proof = gen_kzg_proof::<
+                  //         _,
+                  //         _,
+                  //         PoseidonTranscript<NativeLoader, _>,
+                  //         PoseidonTranscript<NativeLoader, _>,
+                  //     >(params, &pk, circuit, pi_inner.clone())?;
+                  //     Ok(Snark::new(protocol, pi_inner, proof))
+                  // }
             };
         }
         Commands::Verify {
@@ -204,6 +246,87 @@ pub fn run(args: Cli) -> Result<(), Box<dyn Error>> {
                 }
             }
         }
+        // Take one or more previously computed proofs, and aggregate them to final proof
+        Commands::Aggregate {
+            input_proof_path,
+            output_proof_path,
+            vk_path,
+            params_path,
+            pfsys,
+        } => {
+            // How should we determine the original logrows of the application proof? Maybe include in the proof json serialization format.
+            // We will need aggregator k > application k > bits
+            //		    let application_logrows = args.logrows; //bits + 1;
+            //let aggregation_logrows = args.logrows + 6;
+            // for now we will use the cli option logrows
+
+            match pfsys {
+                ProofSystem::IPA => {
+                    unimplemented!()
+                }
+                ProofSystem::KZG => {
+                    let params: ParamsKZG<Bn256> =
+                        load_params::<KZGCommitmentScheme<Bn256>>(params_path)?;
+                    // load snarks (previous prrofs) from input proof path
+
+                    let snarks = [gen_application_snark(&params_app, &data, &args)?];
+
+                    info!("Application proof took {}", now.elapsed().as_secs());
+                    let agg_circuit = AggregationCircuit::new(&params, snarks)?;
+                    let pk = gen_pk(&params, &agg_circuit)?;
+                    let deployment_code = gen_aggregation_evm_verifier(
+                        &params,
+                        pk.get_vk(),
+                        AggregationCircuit::num_instance(),
+                        AggregationCircuit::accumulator_indices(),
+                    )?;
+                    let now = Instant::now();
+                    let proof = gen_kzg_proof::<
+                        _,
+                        _,
+                        EvmTranscript<G1Affine, _, _, _>,
+                        EvmTranscript<G1Affine, _, _, _>,
+                    >(
+                        &params, &pk, agg_circuit.clone(), agg_circuit.instances()
+                    )?;
+                    info!("Aggregation proof took {}", now.elapsed().as_secs());
+                    let now = Instant::now();
+                    evm_verify(deployment_code, agg_circuit.instances(), proof)?;
+                    info!("verify took {}", now.elapsed().as_secs());
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// Create proof and instance variables for the application snark
+pub fn gen_application_snark(
+    params: &ParamsKZG<Bn256>,
+    data: &ModelInput,
+    args: &Cli,
+) -> Result<Snark, Box<dyn Error>> {
+    let (circuit, public_inputs) = prepare_circuit_and_public_input::<Fr>(data, args)?;
+
+    let pk = gen_pk(params, &circuit)?;
+    let number_instance = public_inputs[0].len();
+    trace!("number_instance {:?}", number_instance);
+    let protocol = compile(
+        params,
+        pk.get_vk(),
+        Config::kzg().with_num_instance(vec![number_instance]),
+    );
+    let pi_inner: Vec<Vec<Fr>> = public_inputs
+        .iter()
+        .map(|i| i.iter().map(|e| i32_to_felt::<Fr>(*e)).collect::<Vec<Fr>>())
+        .collect::<Vec<Vec<Fr>>>();
+    //    let pi_inner = pi_inner.iter().map(|e| e.deref()).collect::<Vec<&[Fr]>>();
+    trace!("pi_inner {:?}", pi_inner);
+    let proof = gen_kzg_proof::<
+        _,
+        _,
+        PoseidonTranscript<NativeLoader, _>,
+        PoseidonTranscript<NativeLoader, _>,
+    >(params, &pk, circuit, pi_inner.clone())?;
+    Ok(Snark::new(protocol, pi_inner, proof))
 }
